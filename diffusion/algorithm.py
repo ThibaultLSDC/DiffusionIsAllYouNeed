@@ -16,7 +16,7 @@ class BaseDiffusion:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.model = model.to(self.device)
-        self.optim = Adam(model.parameters())
+        self.optim = Adam(model.parameters(), lr=2e-4)
 
         self.mse = MSELoss()
 
@@ -38,13 +38,13 @@ class BaseDiffusion:
             t = torch.randint(0, self.T, size=(x.size(0),))
             alpha = self.alphas[t][..., None, None, None]
 
-            pred = self.model(x, t)
-
             eps = torch.randn_like(x)
 
-            obj = pred * (torch.sqrt(alpha) * x + torch.sqrt(1 - alpha) * eps)
+            obj = (torch.sqrt(alpha) * x + torch.sqrt(1 - alpha) * eps)
 
-            loss = self.mse(obj, eps)
+            x_t = self.model(obj, t)
+
+            loss = self.mse(x_t, eps)
 
             self.optim.zero_grad()
             loss.backward()
