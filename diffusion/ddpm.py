@@ -28,14 +28,15 @@ class BaseDiffusion:
 
         self.alphas = torch.cumprod(self.alpha, dim=0)
 
-        self.sigmas = torch.sqrt(((1 - torch.concat([torch.ones(1, device=self.device), self.alphas], dim=0)) / (1 - torch.concat([self.alphas, torch.ones(1, device=self.device)], dim=0)))[:-1] * self.beta)
+        self.sigmas = torch.sqrt(self.beta)
 
-    def train(self, loader : 'DataLoader'):
+    def train(self, loader : 'DataLoader', epoch: int):
         counter = tqdm(loader)
-        for x, _ in counter:
+        total_loss = 0
+        for i, (x, _) in enumerate(counter):
             x = x.to(self.device)
             
-            t = torch.randint(0, self.T, size=(x.size(0),))
+            t = torch.randint(0, self.T, size=(x.size(0),), device=self.device)
             alpha = self.alphas[t][..., None, None, None]
 
             eps = torch.randn_like(x)
@@ -50,7 +51,11 @@ class BaseDiffusion:
             loss.backward()
             self.optim.step()
 
-            counter.set_description(f"Loss is {loss.cpu().detach().item()}")
+            total_loss += loss.cpu().detach().item()
+
+            counter.set_description(f"Epoch {epoch+1}, Loss is {total_loss / (i+1):4f}")
+        
+        return total_loss / (i+1)
         
     def sample(self, example_batch):
 
@@ -66,7 +71,9 @@ class BaseDiffusion:
             with torch.no_grad():
                 eps = self.model(x, t)
 
-            x = (x - eps * (1 - self.alpha[t]) / (1 - self.alphas[t])**.5) / self.alpha[t]**.5 + self.sigmas[t] * z
+            mean = (x - eps * (1 - self.alpha[t]) / (1 - self.alphas[t])**.5) / self.alpha[t]**.5 
+
+            x = mean + self.sigmas[t] * z
 
             if t % 100 == 0:
                 samples.append(torch.clone(x))

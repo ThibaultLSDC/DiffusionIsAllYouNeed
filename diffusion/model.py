@@ -109,9 +109,18 @@ class Transformer(nn.Module):
         return x
 
 
-# class ViTBlock(nn.Module):
-#     def __init__(self) -> None:
-#         super().__init__()
+class ViTBlock(nn.Module):
+    def __init__(self, dim=128, heads=4, dim_head=32, mlp_dim=64, dropout=0.) -> None:
+        super().__init__()
+        self.tf = Transformer(dim, heads, dim_head, mlp_dim, dropout=dropout)
+
+
+    def forward(self, x: torch.Tensor, t, T=1000):
+        b, c, h, w = x.shape
+        x = rearrange(x, 'b c h w -> b (h w) c')
+        embed = torch.sin(torch.ones_like(x, device=x.device) * 2 * torch.pi * t / T)
+        x = self.tf(x + embed)
+        return rearrange(x, 'b (h w) c -> b c h w', h = h)
 
 
 class BaseUnet(nn.Module):
@@ -158,6 +167,61 @@ class BaseUnet(nn.Module):
         x = self.in_conv(input)
         x_1 = self.core1(x)
         x_2 = self.core2(self.avgpool1(x_1))
+        x_3 = self.core3(self.avgpool2(x_2))
+        x = self.core4(self.avgpool3(x_3))
+
+        x = self.upcore1(self.upsample1(x) + x_3)
+        x = self.upcore2(self.upsample1(x) + x_2)
+        x = self.upcore3(self.upsample1(x) + x_1)
+
+        return self.conv(x)
+
+
+class AttentionUnet(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_conv = nn.Conv2d(3, 128, 1, 1)
+        self.core1 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.avgpool1 = nn.AvgPool2d(2, 2)
+        self.core21 = ResBlock(128, 128)
+        self.core22 = ViTBlock()
+        self.core23 = ResBlock(128, 128)
+
+        self.avgpool2 = nn.AvgPool2d(2, 2)
+        self.core3 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.avgpool3 = nn.AvgPool2d(2, 2)
+        self.core4 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.upsample1 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.upcore1 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.upsample2 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.upcore2 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.upsample3 = nn.Upsample(scale_factor=2, mode='bilinear')
+        self.upcore3 = nn.Sequential(
+            ResBlock(128, 128),
+            ResBlock(128, 128)
+        )
+        self.conv = nn.Conv2d(128, 3, 3, 1, 1)
+    
+    def forward(self, input, t):
+        x = self.in_conv(input)
+        x_1 = self.core1(x)
+        x_2 = self.core21(self.avgpool1(x_1))
+        x_2 = self.core23(self.core22(x_2, t))
         x_3 = self.core3(self.avgpool2(x_2))
         x = self.core4(self.avgpool3(x_3))
 
