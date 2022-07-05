@@ -1,5 +1,6 @@
 from torch.optim import Adam
 from torch.nn import MSELoss
+from copy import deepcopy
 
 import torch
 
@@ -16,6 +17,9 @@ class BaseDiffusion:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.model = model.to(self.device)
+        self.ema = deepcopy(self.model)
+        self.tau = .9999
+
         self.optim = Adam(model.parameters(), lr=2e-4)
 
         self.mse = MSELoss()
@@ -29,6 +33,10 @@ class BaseDiffusion:
         self.alphas = torch.cumprod(self.alpha, dim=0)
 
         self.sigmas = torch.sqrt(self.beta)
+    
+    def soft_update(self):
+        for params, target_params in zip(self.model.parameters(), self.ema.parameters()):
+            target_params.data.copy_(target_params.data * self.tau + params.data * (1-self.tau))
 
     def train(self, loader : 'DataLoader', epoch: int):
         counter = tqdm(loader)
@@ -54,22 +62,24 @@ class BaseDiffusion:
             total_loss += loss.cpu().detach().item()
 
             counter.set_description(f"Epoch {epoch+1}, Loss is {total_loss / (i+1):4f}")
-        
+
+            self.soft_update()
+
         return total_loss / (i+1)
         
     def sample(self, example_batch):
 
-        x = torch.randn_like(example_batch)
+        x = example_batch.to(self.device)
 
-        x_0 = torch.clone(x)
+        x_T = torch.clone(x)
 
-        samples = [x_0]
+        samples = [x_T]
 
         for t in tqdm(range(self.T - 1, -1, -1), desc='Sampling...'):
             z = torch.randn_like(x)
 
             with torch.no_grad():
-                eps = self.model(x, t)
+                eps = self.ema(x, t)
 
             mean = (x - eps * (1 - self.alpha[t]) / (1 - self.alphas[t])**.5) / self.alpha[t]**.5 
 
